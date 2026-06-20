@@ -322,6 +322,43 @@
     outline:none;
   }
   input[type=text]:focus{ box-shadow:0 0 0 3px rgba(192,132,252,0.4); }
+  .icon-btn{
+    width:44px;
+    min-width:44px;
+    border:none;
+    border-radius:22px;
+    background:rgba(255,255,255,0.92);
+    color:#4a2e5c;
+    font-size:18px;
+    cursor:pointer;
+    transition:0.15s;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .icon-btn:hover{ filter:brightness(1.05); }
+  .icon-btn.active{ background:linear-gradient(135deg,var(--lav-deep),var(--pink-deep)); color:#fff; }
+  .language-select{
+    min-width:130px;
+    border:1px solid rgba(255,255,255,0.3);
+    border-radius:22px;
+    padding:10px 14px;
+    font-family:'Quicksand',sans-serif;
+    font-size:13.5px;
+    color:#4a2e5c;
+    background:rgba(255,255,255,0.92);
+    cursor:pointer;
+  }
+  .speech-status{
+    align-self:center;
+    padding:8px 12px;
+    border-radius:999px;
+    background:rgba(255,255,255,0.15);
+    color:var(--text);
+    font-size:12px;
+    white-space:nowrap;
+    border:1px solid rgba(255,255,255,0.2);
+  }
   button[type=submit]{
     background:linear-gradient(135deg,var(--lav-deep),var(--pink-deep));
     color:#fff;
@@ -413,6 +450,15 @@
   </div>
 
   <form id="chatForm">
+    <button type="button" class="icon-btn" id="micBtn" title="Start voice input">🎤</button>
+    <button type="button" class="icon-btn active" id="speechToggle" title="Voice replies enabled">🔊</button>
+    <select id="languageSelect" class="language-select" title="Select voice language">
+      <option value="en-US">English</option>
+      <option value="hi-IN">Hindi</option>
+      <option value="ta-IN">Tamil</option>
+      <option value="te-IN">Telugu</option>
+    </select>
+    <span class="speech-status" id="speechStatus">Ready for voice</span>
     <input type="text" id="messageInput" placeholder="Message Shyra..." autocomplete="off" autofocus>
     <button type="submit" id="sendBtn">Send</button>
   </form>
@@ -423,14 +469,153 @@ const log = document.getElementById('log');
 const form = document.getElementById('chatForm');
 const input = document.getElementById('messageInput');
 const sendBtn = document.getElementById('sendBtn');
+const micBtn = document.getElementById('micBtn');
+const speechToggle = document.getElementById('speechToggle');
+const languageSelect = document.getElementById('languageSelect');
 const resetBtn = document.getElementById('resetBtn');
 const newChatBtn = document.getElementById('newChatBtn');
 const sidebarToggle = document.getElementById('sidebarToggle');
 const sidebar = document.getElementById('sidebar');
 const historyList = document.getElementById('historyList');
 const suggestions = document.getElementById('suggestions');
+const speechStatus = document.getElementById('speechStatus');
 
 const userAvatarHTML = '<div class="avatar user-avatar">You</div>';
+
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const recognitionSupported = Boolean(SpeechRecognition);
+let recognition = null;
+let listening = false;
+let speechEnabled = true;
+
+function createRecognition(lang){
+  if(!recognitionSupported) return null;
+  const recog = new SpeechRecognition();
+  recog.lang = lang;
+  recog.interimResults = false;
+  recog.maxAlternatives = 1;
+  recog.onstart = () => {
+    listening = true;
+    updateMicButton();
+  };
+  recog.onresult = (event) => {
+    const transcript = event.results[0][0].transcript;
+    listening = false;
+    updateMicButton();
+    if(transcript){
+      input.value = transcript;
+      sendMessage(transcript);
+    }
+  };
+  recog.onend = () => {
+    listening = false;
+    updateMicButton();
+  };
+  recog.onerror = (event) => {
+    listening = false;
+    speechStatus.textContent = 'Voice error: ' + (event.error || 'unknown');
+    updateMicButton();
+  };
+  recog.onnomatch = () => {
+    listening = false;
+    speechStatus.textContent = 'No speech detected, try again';
+    updateMicButton();
+  };
+  return recog;
+}
+
+function initRecognition(){
+  if(!recognitionSupported){
+    micBtn.disabled = true;
+    micBtn.title = 'Voice input not supported in this browser';
+    speechStatus.textContent = 'Voice input unavailable';
+    return;
+  }
+  if(recognition){
+    try { recognition.stop(); } catch (err) {}
+  }
+  recognition = createRecognition(languageSelect.value);
+}
+
+if(recognitionSupported){
+  initRecognition();
+} else {
+  micBtn.disabled = true;
+  micBtn.title = 'Voice input not supported in this browser';
+  speechStatus.textContent = 'Voice input unavailable';
+}
+
+function updateMicButton(){
+  if(listening){
+    micBtn.textContent = '⏹️';
+    micBtn.classList.add('active');
+    micBtn.title = 'Stop voice input';
+    speechStatus.textContent = 'Listening...';
+  } else {
+    micBtn.textContent = '🎤';
+    micBtn.classList.remove('active');
+    micBtn.title = recognitionSupported ? 'Start voice input' : 'Voice input unavailable';
+    speechStatus.textContent = speechEnabled ? 'Ready for voice' : 'Text-only mode';
+  }
+}
+
+function updateSpeechToggle(){
+  if(speechEnabled){
+    speechToggle.textContent = '🔊';
+    speechToggle.classList.add('active');
+    speechToggle.title = 'Voice replies enabled';
+    speechStatus.textContent = listening ? 'Listening...' : 'Replies will speak aloud';
+  } else {
+    speechToggle.textContent = '🔇';
+    speechToggle.classList.remove('active');
+    speechToggle.title = 'Voice replies disabled';
+    speechStatus.textContent = listening ? 'Listening...' : 'Text-only replies';
+  }
+}
+
+function speakText(text){
+  if(!speechEnabled || !window.speechSynthesis || !text) return;
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = languageSelect.value;
+  utterance.rate = 1;
+  window.speechSynthesis.cancel();
+  speechStatus.textContent = 'Speaking...';
+  utterance.onend = () => {
+    speechStatus.textContent = listening ? 'Listening...' : (speechEnabled ? 'Ready for voice' : 'Text-only replies');
+  };
+  window.speechSynthesis.speak(utterance);
+}
+
+micBtn.addEventListener('click', () => {
+  if(!recognitionSupported) return;
+  if(listening){
+    recognition.stop();
+  } else {
+    initRecognition();
+    try {
+      recognition.start();
+    } catch (err) {
+      listening = false;
+      speechStatus.textContent = 'Voice error: ' + (err.message || 'failed to start');
+    }
+  }
+  updateMicButton();
+});
+
+languageSelect.addEventListener('change', () => {
+  if(recognitionSupported){
+    initRecognition();
+  }
+  updateSpeechToggle();
+});
+
+speechToggle.addEventListener('click', () => {
+  speechEnabled = !speechEnabled;
+  updateSpeechToggle();
+});
+
+updateMicButton();
+updateSpeechToggle();
 
 let currentSessionId = null;
 let currentTranscript = []; // [{role, html}]
@@ -579,6 +764,7 @@ async function sendMessage(text){
         });
         finalHTML += '</div>';
       }
+      speakText(data.reply);
     }
     thinkingBubble.innerHTML = finalHTML;
     currentTranscript.push({role:'assistant', html: finalHTML});
